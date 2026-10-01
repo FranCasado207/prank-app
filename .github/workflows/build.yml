@@ -1,0 +1,61 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release -j
+
+      - name: Locate binary
+        id: locate
+        shell: bash
+        run: |
+          if [ -f build/PrankApp ]; then
+            path="build/PrankApp"
+          elif [ -f build/Release/PrankApp.exe ]; then
+            path="build/Release/PrankApp.exe"
+          elif [ -f build/PrankApp.exe ]; then
+            path="build/PrankApp.exe"
+          else
+            echo "Could not find built executable" >&2
+            find build -maxdepth 3 -type f >&2
+            exit 1
+          fi
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+
+      # Sanity check: launch briefly and confirm it doesn't crash even without
+      # a real audio device / sound server on the CI runner (audio + volume
+      # code paths already no-op gracefully when unavailable).
+      - name: Smoke test
+        shell: bash
+        run: |
+          "${{ steps.locate.outputs.path }}" --foreground --test-mode &
+          pid=$!
+          sleep 5
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "Process exited unexpectedly during smoke test" >&2
+            exit 1
+          fi
+          kill "$pid"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PrankApp-${{ matrix.os }}
+          path: ${{ steps.locate.outputs.path }}
