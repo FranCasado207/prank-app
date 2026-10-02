@@ -2,6 +2,7 @@ name: build
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -55,7 +56,41 @@ jobs:
           fi
           kill "$pid"
 
+      - name: Stage release asset
+        shell: bash
+        run: |
+          mkdir -p dist
+          case "${{ matrix.os }}" in
+            ubuntu-latest)  cp "${{ steps.locate.outputs.path }}" "dist/PrankApp-linux" ;;
+            macos-latest)   cp "${{ steps.locate.outputs.path }}" "dist/PrankApp-macos" ;;
+            windows-latest) cp "${{ steps.locate.outputs.path }}" "dist/PrankApp-windows.exe" ;;
+          esac
+
       - uses: actions/upload-artifact@v4
         with:
           name: PrankApp-${{ matrix.os }}
-          path: ${{ steps.locate.outputs.path }}
+          path: dist/*
+
+  release:
+    needs: build
+    # Only publish on push (not PR), once the whole matrix has built.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            Automated build from ${{ github.sha }} on `${{ github.ref_name }}`.
+          files: dist/*
